@@ -23,10 +23,28 @@ import sun.management.ConnectorAddressLink;
 public class HealthCheck {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
     private static final String KAFKA_PROCESS = "kafka.Kafka";
-    private static final String KAFKA_MBEAN_BROKERSTATE = "kafka.server:type=KafkaServer,name=BrokerState";
+    private static final String KAFKA_MBEAN_BROKER_STATE = "kafka.server:type=KafkaServer,name=BrokerState";
     private static final String EXEC_COMMAND = "jps -l";
-    private static final int EXEC_THRESHOLD = 5;
+    private static final int EXEC_THRESHOLD = 3;
 
+    /**
+     * Auxiliary method to report the Kafka broker status. Note that this class does not perform any business
+     * logic, it simply reports the status. For monitoring purposes you can take it from 'here'. In case of
+     * an exception, the failure message is reported and the exit code is 1.
+     *
+     * Possible values are:
+     *  - 0: not running
+     *  - 1: starting
+     *  - 2: recovering from unclean shutdown ( <-- likely to be accepted as well as valid status )
+     *  - 3: running                          ( <-- the status you want for a healthy broker)
+     *  - 6: pending controlled shutdown
+     *  - 7: shutting down
+     *
+     *  There is no 4 and 5 (got removed)
+     *
+     * See also:
+     * - https://github.com/apache/kafka/blob/trunk/core/src/main/scala/kafka/server/BrokerStates.scala
+     */
     public void reportBrokerStatus() {
         try {
             int brokerStatus = this.findKafkaBrokerStatus(this.findProcessIdForKafka());
@@ -54,14 +72,15 @@ public class HealthCheck {
      *  When the JMX Object reference to the BrokerState fails.
      */
     protected int findKafkaBrokerStatus(int processId) throws IOException, MalformedObjectNameException {
+        LOGGER.debug("Found process id: {}", processId);
         String localJmxAddress = ConnectorAddressLink.importFrom(processId);
         LOGGER.debug("Found localJmxAddress: {}", localJmxAddress);
         JMXServiceURL jmxServiceURL = new JMXServiceURL(localJmxAddress);
+        // Connect to local JMX
         JMXConnector jmxConnector = JMXConnectorFactory.connect(jmxServiceURL, null);
         MBeanServerConnection mBeanServerConnection = jmxConnector.getMBeanServerConnection();
-        // Find MBean
-        ObjectName mbeanName = new ObjectName(KAFKA_MBEAN_BROKERSTATE);
-        // Instantiate proxy to MBean
+        // Find MBean and instantiate a proxy
+        ObjectName mbeanName = new ObjectName(KAFKA_MBEAN_BROKER_STATE);
         JmxReporter.GaugeMBean gaugeMBean = JMX.newMBeanProxy(mBeanServerConnection, mbeanName, JmxReporter.GaugeMBean.class, true);
         return (int) gaugeMBean.getValue();
     }
@@ -90,7 +109,7 @@ public class HealthCheck {
         Process process = Runtime.getRuntime().exec(EXEC_COMMAND);
         boolean success = process.waitFor(EXEC_THRESHOLD, TimeUnit.SECONDS);
         if (!success) {
-            throw new IllegalStateException(String.format("Query for Java processes did not finish in time ({}), aborting", EXEC_THRESHOLD));
+            throw new IllegalStateException(String.format("Query for Java processes did not finish in time (%s), aborting", EXEC_THRESHOLD));
         }
         BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
         String line;
