@@ -24,8 +24,14 @@ See also:
 
 ## Usage
 
-Example:
+Example input:
 
 ```
-java -jar target/health-check-${VERSION}.jar
+java -jar health-check-${VERSION}.jar
+```
+
+Example output:
+
+```
+3
 ```
